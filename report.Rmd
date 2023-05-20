@@ -1,0 +1,364 @@
+---
+title: "Effect of Diversity on Success of Hollywood"
+author: "Safal Shrestha"
+date: "2023-05-19"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    df_print: paged
+    theme: lumen
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+library(tidyverse)
+library(lubridate)
+library(readxl)
+library(zoo)
+library(stargazer)
+library(RColorBrewer)
+library(kableExtra)
+library(dagitty)
+library(lmtest)
+library(lfe)
+```
+
+## Introduction
+Inclusion in Hollywood is a topic of great importance and coverage. This study will explore the effect of the ethnic composition of the lead and supporting cast of Hollywood movies on the box office. We will further study this effect overseas, specifically in two countries: China and United Kingdom. This is to mainly see if ethnic diversity in the cast has different effects on the box office in countries with different cultural values. United Kingdom and China are two of the biggest markets for Hollywood. Moreover, United Kingdom can be considered having more cultural affinity with the US than China. Through this study, we'll check if this closeness actually plays any role in the success of a Hollywood movie.
+
+<hr />
+First, the report will go through exploratory analysis where we'll look into the overall trend of ethnic and gender composition in top 11 Hollywood movies (by box office earnings in USA and Canada) per year from 2010-2022.
+
+Second, we'll look into the effect of ethnic composition of the leading cast on the success of movies in the domestic market (US and Canada).
+
+Finally, we'll look into the effect of ethnic composition of leading cast + supporting cast on the success of movies in the UK and China markets.
+
+All the data used for this analysis comes from [The Numbers website](https://www.the-numbers.com/) for box office data and [Namsor API](https://namsor.app/) for gender and ethnicity prediction from names. [1]
+
+## Discussion
+
+In our analysis, we are gathering box office information for the top 11 movies from the rank of best earning in the domestic market from 2010 to 2022. First, we'll take a closer look into the ethnic composition of these top Hollywood movies and the trend over the years.
+
+
+```{r, echo=FALSE, results=FALSE}
+# read all domestic movies
+domestic_movies = data.frame()
+
+for (year in 2010:2022) {
+  df = read.csv(paste("top_domestic/domestic-", year, ".csv", sep=""))
+  df$year = year
+  domestic_movies = rbind(domestic_movies, df)
+}
+
+# filter unnecessary columns and rename some
+# For international box office, we only have information on top 11 movies from 2010-2022, so we'll limit the analysis to that
+domestic_movies = domestic_movies %>% select(-c("X", "link", "Opening.Weekend.Box.Office")) %>% 
+  rename(c("domestic_box_office" = "Domestic.Box.Office",
+          "theater_count"  = "Max.Theater.Count")) %>% 
+  subset(Rank <= 11)
+
+# international box office filenames were changed in windows system after unzipping it, : were replaced with _
+domestic_movies$Movie = str_replace(domestic_movies$Movie, pattern=":", replacement="_")
+
+# convert box office column to integer
+domestic_movies$domestic_box_office = str_replace_all(domestic_movies$domestic_box_office, pattern = "[$,]", replacement="")
+domestic_movies$domestic_box_office = as.integer(domestic_movies$domestic_box_office)
+# str(domestic_movies)
+
+# normalize box office earnings by dividing box office earnings by theater count
+# domestic_movies$norm_earnings = domestic_movies$domestic_box_office / domestic_movies$theater_count
+```
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# read cast with gender and ethnicity dataest
+# this was collected beforehand with use of Namesor api and exported
+cast = read.csv("cast_with_gender_and_ethnicity.csv")
+
+cast = cast %>% mutate(raceEthnicity = ifelse(name == "Zendaya", "B_NL", raceEthnicity))
+cast = cast %>% mutate(raceEthnicity = ifelse(name == "Awkwafina", "A", raceEthnicity))
+cast = cast %>% mutate(raceEthnicity = ifelse(name == "Halsey", "W_NL", raceEthnicity))
+cast = cast %>% mutate(raceEthnicity = ifelse(name == "Bono", "W_NL", raceEthnicity))
+
+cast_nums = cast %>% select(c("raceEthnicity")) %>% group_by(raceEthnicity) %>% summarize(total=n())
+
+# count of all ethnicities from 2010 to 2022
+cast_nums %>% ggplot(aes(x=raceEthnicity,y=total)) +
+  geom_bar(stat = "identity", fill="darkgoldenrod3") +
+  geom_text(aes(label=total), color="white", vjust=1.4, size=3.5) +
+  labs(x="Ethnicity", y="Count") +
+  ggtitle("Ethnicity of Leading Cast in Top Hollywood Movies (2010-2022)") +
+  scale_x_discrete(labels=c("Asian", "Black", "Hispanic", "White")) +
+  theme_minimal()
+```
+
+This graph details the ethnicity count of the leading casts of top 11 Hollywood movies for every year from 2010 to 2022. This clearly shows that majority of them are white, followed by Black Non-Latino, Hispanic, and Asian.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+cast$year = as.integer(str_extract(cast$filename, pattern="[0-9]+"))
+
+cast_nums_year = cast %>% group_by(year, raceEthnicity) %>% summarize(total=n())
+cast_nums_year_gender = cast %>% group_by(year, likelyGender) %>% summarize(total=n())
+
+# ethicity of cast over the years
+cast_nums_year %>% ggplot() +
+  aes(x=year, y=total, group=raceEthnicity, color=raceEthnicity) +
+  geom_line() +
+  theme_minimal() +
+  labs(color="Ethnicity", x = "Year", y = "Count of Leading Actors", title = "Leading Actors of different Ethnicities in Top 11 Movies") +
+  scale_color_manual(labels = c("Asian", "Black", "Hispanic", "White"), values=brewer.pal(4, "Spectral")) +
+  scale_x_continuous(breaks=seq(2010,2022, by=4), minor_breaks = seq(2010, 2022, by=2)) 
+```
+
+This graph again shows that the dominant race is white for leading cast in Hollywood for every year from 2010 to 2022. Meanwhile, Asian and Hispanic actors seem to be under-represented.
+
+```{r, echo=FALSE}
+# line chart of gender representation over the years
+cast_nums_year_gender %>% ggplot() +
+  aes(x=year, y=total, group=likelyGender, color=likelyGender) +
+  geom_line() +
+  theme_minimal() +
+  labs(color="Gender", x = "Year", y = "Count of Leading Actors", title = "Male vs Female Leads in Top 10 Hollywood Movies (2010-2022)") +
+  # scale_color_manual(labels = c("Asian", "Black"), values=brewer.pal(4, "Spectral")) +
+  scale_x_continuous(breaks=seq(2010,2022, by=4), minor_breaks = seq(2010, 2022, by=2)) 
+```
+
+The story is similar in case of gender as well. Male representation is much higher in leading roles than females.
+
+<hr />
+
+The results discussed above are expected. They clearly show the disparity in representation of minorities in the Hollywood industry.
+Now, we'd like to analyze the impact of ethnic diversity on the success of a movie on box office. We can first try to see this relationship visually. In this case, all the minority ethnicities are grouped together for simplicity.
+
+```{r, echo=FALSE, message=FALSE}
+# summarize ethnicity of leads in domestic market
+domestic_leads_wide = cast %>% group_by(filename, likelyGender, raceEthnicity) %>% 
+  summarize(total=n()) %>% 
+  pivot_wider(id_cols = c("filename"),
+              names_from = c("raceEthnicity", "likelyGender"),
+              values_from = total)
+domestic_leads_wide[is.na(domestic_leads_wide)] = 0
+
+domestic_leads_wide$movie = str_extract(domestic_leads_wide$filename, pattern="(?<=_[0-9]_).+(?=\\.)")
+
+domestic_data = domestic_leads_wide %>% left_join(domestic_movies %>% select(c("Movie", "domestic_box_office")), by=c("movie" = "Movie"))
+# aggregate into white and minorities
+domestic_data = domestic_data %>% mutate(white = W_NL_male + W_NL_female,
+                                         minorities = B_NL_male + HL_male + A_male +
+                                         B_NL_female + HL_female + A_female)
+
+# bubble chart of minority casts vs domestic box office earnings
+domestic_data %>% ggplot(aes(x=minorities, y=domestic_box_office/ 1000000, size=white)) + 
+  geom_point(alpha=0.5, color="firebrick3") +
+  scale_size(range=c(1,8), name="White Leads") +
+  labs(x="No. of Minority Casts (Black, Hispanic, Asian)", y="Domestic Earnings (In Millions)",
+       title="Relationship between Box Office Earnings and Cast Diversity") +
+  theme_minimal()
+```
+
+This graph gives us some indication that a diverse cast can actually lead to more success in the box office. Although there are movies with no minority leads at all that have performed well, we find that there are multiple instances where movies with combination of minority and white casts have performed quite well. It is possible that movies with more minorities are performing well because it also includes more white leads and a larger budget. In our graph, there aren't many cases of highly performing movies that has only minority leads. The relationship presented by this graph needs to be further scrutinized and studied.
+
+Upon further exploring this relationship, we find that, a higher number of cast leads to better domestic box office earnings. More importantly, the relationship shows that inclusion of only white actors in leading roles can negatively affect domestic box office earnings. Therefore, although there can be a significant number of white leads in a movie, adding minorities in leading roles as well actually leads to more success. There are definitely some other factors in play that could provide some more explanation. For example, a larger number of white and minority cast may speak to the quality of the movie and its budget. These kind of movies may be succeeding because of the distributor backing them. However, this result gives us some indication of the benefit of having diverse leads in a movie. Please refer to [2, 3, 4] for a closer look.
+
+<hr />
+
+Now, we'd also like to see if this relationship is present in other countries as well. We'd like to choose countries that are the biggest market for Hollywood.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# gather all international box office information for the top 11 movies
+int_box_files = list.files("box_office_international")
+# For international box office, we only have information on top 11 movies from 2010-2022, so we'll limit the analysis to that
+int_box_files = int_box_files[int_box_files %>% str_detect(pattern = "20[0-9][0-9]_[0-9]_")]
+
+int_box_office = data.frame()
+
+countries = c()
+
+# read all files present in box_office_international folder
+for (file in int_box_files) {
+  df = read.csv(paste("box_office_international/", file, sep=""))
+  if (!"Territory" %in% colnames(df)) next
+  # if X is in colnames in the first position, the first column names are shifted by 1. Instance in 2014_4_The Lego Movie.csv
+  if (class(df$X) != "integer") {
+    test = df[, -ncol(df)]
+    colnames(test) = names(df)[-1]
+    df = test
+    
+  }
+  df$Maximum.Screens = as.integer(df$Maximum.Screens)
+  df = df %>% drop_na()
+  df = df %>% select(-c("Opening.Weekend", "Opening.Weekend.Screens", "Theatrical.Engagements", "Release.Date", "Report.Date"))
+  if ("X" %in% colnames(df)) df = df %>% select(-c("X")) 
+  df = df %>% rename(c("max_screens"="Maximum.Screens", "box_office"="Total.Box.Office"))
+  df$box_office = as.integer(str_replace_all(df$box_office, pattern="[$,]", replacement=""))
+  df$max_screens = as.integer(df$max_screens)
+  df$filename = file
+  int_box_office = rbind(int_box_office, df)
+  
+  # countries = c(countries, df$Territory)
+}
+# unique(countries)
+
+# remove all instances where box office value is 0. It doesn't make sense
+int_box_office = int_box_office %>% subset(box_office != 0)
+# unique(int_box_office$Territory)
+
+int_box_office$movie = str_extract(int_box_office$filename, pattern="(?<=_[0-9]_).+(?=\\.)")
+
+box_office_merged = int_box_office %>% left_join(domestic_movies, by=c("movie" = "Movie"))
+
+best_international = box_office_merged %>% group_by(movie) %>% slice_max(box_office) %>% arrange(filename)
+
+# plot of box office earnings in international market
+best_international %>% group_by(Territory) %>% summarize(total=sum(box_office)) %>% arrange(desc(total)) %>% head(10) %>%
+  mutate(Territory = factor(Territory, levels = unique(Territory))) %>% ggplot(aes(x=Territory, y=total)) +
+  geom_bar(stat = "identity", fill="gold4") +
+  geom_text(aes(label=format(total/1e9, digits=2)), color="gold4", vjust=-0.7, size=3.5) +
+  labs(x="Territory", y="Earning in International Box Office (In Billion)", title="Aggregate Earnings for Popular Movies (2010-2022)") +
+  scale_y_continuous(labels = function(x) format(x/1000000000, nsmall = 2)) +
+  coord_cartesian(ylim = c(0, 7000000000)) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+This graph shows us that China is actually the biggest market for Hollywood movies for the period of 2010-2022 based on the top 11 highest grossing movies. Following that, there's United Kingdom. We'll choose these two countries as they are culturally different and see if this difference makes an impact on the effect of diversity on the box office. 
+We'll take all the movies from our dataset that have released in both the United Kingdom and China. For this case, along with the leading roles, we'll factor in ethnicity of the supporting cast as well since its a smaller sample of movies.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# subset movies for both China and UK
+movies_in_both = int_box_office %>% subset(Territory == "China" | Territory == "United Kingdom") %>% 
+  group_by(filename) %>% summarize(count = n()) %>% subset(count == 2)
+
+# get box office information for the subset above
+china_uk = int_box_office %>% subset(Territory == "China" | Territory == "United Kingdom") %>% 
+  subset(filename %in% movies_in_both$filename)
+
+# average the max screens for each territory to replace missing value
+avg_screens_china = china_uk %>% subset(Territory == "China" & max_screens != 0) %>% pull(max_screens) %>% mean() %>% as.integer()
+avg_screens_uk = china_uk %>% subset(Territory == "United Kingdom" & max_screens != 0) %>% pull(max_screens) %>% mean() %>% as.integer()
+
+# normalize based on population
+china_uk = china_uk %>% mutate(
+  norm = ifelse(Territory == "United Kingdom", box_office / 68920787,
+    ifelse(Territory == "China", box_office / 1455390680, NA))
+)
+# read the ethnicity and gender of leads and supporting characters in movies released in china and uk
+all_cast_china_uk_bio = read.csv("leads_supporting_china_uk.csv")
+
+# summarize the count of ethnicities
+demography_china_uk = all_cast_china_uk_bio %>% group_by(filename, likelyGender, raceEthnicity) %>% 
+  summarize(total=n()) %>% 
+  pivot_wider(id_cols = c("filename"),
+              names_from = c("raceEthnicity", "likelyGender"),
+              values_from = total)
+demography_china_uk[is.na(demography_china_uk)] = 0
+
+# ----------------------------
+# gather all box office info and cast info
+demo_cuk = china_uk %>% left_join(demography_china_uk, by=c("filename"="filename"))
+demo_cuk = demo_cuk %>% left_join(domestic_movies %>% select(c("Movie", "domestic_box_office")),
+                       by=c("movie"="Movie"))
+demo_cuk$diff = demo_cuk$box_office - demo_cuk$domestic_box_office
+
+# aggregate ethnicities information into white and minorities (Black, Hispanc, Asian)
+demo_cuk_agg = demo_cuk %>% mutate(white = W_NL_male + W_NL_female,
+                  minorities = B_NL_male + HL_male + A_male +
+                    B_NL_female + HL_female + A_female,
+                    male = W_NL_male + B_NL_male + HL_male + A_male,
+                    female = W_NL_female + B_NL_female + HL_female + A_female)
+
+# bubble chart of china and uk
+demo_cuk_agg %>%  ggplot(aes(x=minorities, y=diff / 1000000, size=white)) + 
+  geom_point(aes(color=Territory),alpha=0.5) +
+  scale_color_manual(values = c("China" = "firebrick1", "United Kingdom" = "dodgerblue2")) +
+  scale_size(range=c(1,8), name="No. of White Casts") +
+  labs(x="No. of Minority Casts (Black, Hispanic, Asian)", y="Difference from Hollywood Box Office (In Millions)",
+       title="Earnings Relative to Hollywood and Cast Diversity") +
+  theme_minimal()
+
+```
+
+For China and UK, the relationship seems a bit ambiguous. The y axis shows how much a movie earned in China or UK relative to what it earned in the domestic market. Negative values just mean that the movie earned less than it did in the domestic market.
+Assuming that China and UK have different kinds of effect on the box office, such an analysis shows some indication that movies in China perform better than in the United Kingdom. Surprisingly, it also indicates that having a diverse cast actually leads to lower performance. However, these results could be a result of randomness and further scrutiny is needed to actually make any specific claims about this relationship. Please refer to [4, 5] for a closer look.
+
+<style type="text/css">
+  table { margin: 40px auto; }
+  th { text-align: center; background-color: #f2f2f2; }
+  td { text-align: center; }
+</style>
+
+## Conclusion
+This report explored the relationship between the ethnicity of the cast in top Hollywood movies and box office earnings. In the first phase, we explored the general summary of our dataset with ethnic composition of movies, international box office performance, etc. Second, we looked into how diversity affects the box office in the domestic market. Then, we also explored the possibility whether this relationship is affected by where the movie is released.
+There are a lot of confounding variables involved in the study of such a relationship between ethnic diversity and box office performance. Distributor of the movies, centrality of characters, and content of the movie itself could be some factors that affect this relationship. However, this study acts as a good overview of what could be happening in the industry. Especially in the recent years, minority representation has progressed and our study shows, at least in the domestic market, that diversity actually positively affects box office performance. 
+For an international market like China and United Kingdom, an assumption that cultural values might affect a movie performance could be more complicated. Factors like actors, content, etc. might be more influential than cultural factors.
+
+## Appendix
+[1] All the data scraped from the numbers website is available here: ![https://github.com/safal312/hollywood_demographics_analysis]
+
+[2] Regression table for "domestic_box_office ~ white + minorities + white * minorities"
+```{r, echo=FALSE,results='asis',warning=FALSE, message=FALSE}
+model = lm("domestic_box_office ~ white + minorities + white * minorities",
+           data=domestic_data)
+stargazer(model, type="html",
+          covariate.labels = c("White Cast", "Minority Cast", "White X Minorities"),
+          dep.var.labels = c("Domestic Box Office"))
+```
+
+[3] Breusch Pagan Test for the model above. Here, since the p-value is greater than 0.05, we can loosely accept that there is homoskedaticity in our model. However, more analysis might be required to further confirm this.
+```{r, echo=FALSE}
+bptest(model)
+```
+
+
+[4] Graph of marginal effect of number of white casts on box office for different values of number of minorities.
+```{r, echo=FALSE, warning=FALSE}
+# we're choosing 15 here because in our dataset the max number of minority leading casts in any movie is 14. So, 0-15 is a good range
+
+# this code is for calculating marginal effect
+# for a range of minority counts
+minorities = seq(0,15)
+# the effect
+effect = summary(model)$coefficients[2, 1] + 
+  minorities*summary(model)$coefficients[4, 1]
+# standard errors
+margin_se = sqrt(vcov(model)[2,2] + 
+                   minorities^2*vcov(model)[4,4] + 
+                   2*minorities*vcov(model)[2,4] )
+# conf interval
+low = effect - 1.96 *margin_se
+high = effect + 1.96 *margin_se
+temp = cbind(minorities, effect, low, high)
+temp = as.data.frame(temp)
+
+# plotting the effects with errors
+ggplot(data = temp, aes(x=minorities, y = effect)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = low, ymax = high), width=0.05) + 
+  geom_hline(yintercept = 0, # adding horizontal line
+             color = "deeppink4",
+             size = 0.75,
+             linetype = 2) + 
+  xlab("No. of Minorities") + 
+  ylab("Effect on Box Office") +
+  ggtitle("Marginal effect of white casts on box office") + 
+  theme_light() + 
+  theme(plot.title = element_text(hjust=0.5))
+```
+
+[4] Correlation values of the companies that are most positively and most negatively correlated to crude oil prices.
+```{r, echo=FALSE, warning=FALSE}
+# linear model with fixed effect of Territory and clustered standard errors
+m = felm(box_office ~ white + minorities + white*minorities | Territory | 0 | Territory, data = demo_cuk_agg)
+summary(m)
+```
+
+[5] Intercept for the two territories: China and United Kingdom
+```{r, echo=FALSE}
+getfe(m)
+```
+

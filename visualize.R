@@ -3,9 +3,11 @@ library(dplyr)
 library(stringr)
 library(RColorBrewer)
 library(leaflet)
+library(rgdal)
 
-display.brewer.all()
+# display.brewer.all()
 
+# load the information on gender and ethnicity of leading cast
 cast = read.csv("cast_with_gender_and_ethnicity.csv")
 
 # characters with only first name weren't identified through api
@@ -57,20 +59,32 @@ ggplot() +
   ggtitle("Earnings of Top 10 Hollywood movies (2010-2022)") +
   theme_minimal()
 
-best_international %>% group_by(Territory) %>% summarize(total=sum(box_office)) %>% arrange(desc(total)) %>% head(5) %>%
+# plot of box office earnings in international market
+best_international %>% group_by(Territory) %>% summarize(total=sum(box_office)) %>% arrange(desc(total)) %>% head(10) %>%
   mutate(Territory = factor(Territory, levels = unique(Territory))) %>% ggplot(aes(x=Territory, y=total)) +
   geom_bar(stat = "identity", fill="gold4") +
   geom_text(aes(label=format(total/1e9, digits=2)), color="gold4", vjust=-0.7, size=3.5) +
   labs(x="Territory", y="Earning in International Box Office (In Billion)", title="Aggregate Earnings for Popular Movies (2010-2022)") +
   scale_y_continuous(labels = function(x) format(x/1000000000, nsmall = 2)) +
   coord_cartesian(ylim = c(0, 7000000000)) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# bubble chart of minority casts vs domestic box office earnings
+domestic_data %>% ggplot(aes(x=minorities, y=domestic_box_office/ 1000000, size=white)) + 
+  geom_point(alpha=0.5, color="firebrick3") +
+  scale_size(range=c(.1,6), name="White Leads") +
+  labs(x="No. of Minority Casts (Black, Hispanic, Asian)", y="Domestic Earnings (In Millions)",
+       title="Relationship between Box Office Earnings and Cast Diversity") +
   theme_minimal()
-  # theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
 
-# -----------------------------------------------
+# bubble chart of china and uk
+demo_cuk_agg  %>%  ggplot(aes(x=minorities, y=diff / 1000000, size=white)) + 
+  geom_point(aes(color=Territory),alpha=0.5) +
+  scale_color_manual(values = c("China" = "firebrick1", "United Kingdom" = "dodgerblue2")) +
+  scale_size(range=c(.1,6), name="No. of White Casts") +
+  labs(x="No. of Minority Casts (Black, Hispanic, Asian)", y="Box Office (In Millions)",
+       title="Relationship between Box Office Earnings (In Millions) and Cast Diversity") +
+  theme_minimal()
 
-map_data('world') %>% ggplot() + geom_polygon(aes(x=long, y=lat, group = group), color='white') 
 
-
-leaflet() %>% 
-  addPolygons(data = map_data('word'))
