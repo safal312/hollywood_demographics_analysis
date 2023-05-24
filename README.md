@@ -1,3 +1,4 @@
 # Study of the Effect of Ethnicity in Lead Roles on Movie Success in Hollywood
 Inclusion in Hollywood is a topic of great importance and coverage. This study will explore the effect of the ethnic composition of the lead and supporting cast of Hollywood movies on the box office. We will further study this effect overseas, specifically in two countries: China and United Kingdom. This is to mainly see if ethnic diversity in the cast has different effects on the box office in countries with different cultural values. United Kingdom and China are two of the biggest markets for Hollywood. Moreover, United Kingdom can be considered having more cultural affinity with the US than China. Through this study, we’ll check if this closeness actually plays any role in the success of a Hollywood movie.
+
 Detailed report is hosted on this [link](https://safal312.github.io/hollywood_demographics_analysis/).
